@@ -1,84 +1,50 @@
-import threading
-from queue import Queue
-
-# Очереди для передачи данных между потоками
-text_queue = Queue()
-result_queue = Queue()
+import string
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-def menu():
-    """Диалоговое меню для взаимодействия с пользователем."""
-    while True:
-        print("Меню:")
-        print("1. Ввести текст")
-        print("2. Выполнить анализ текста")
-        print("3. Показать результаты")
-        print("4. Выход")
+# Функция анализа текста
+def analyze_text(words):
+    vowels = set("aeiouAEIOU")
+    consonants = set(string.ascii_letters) - vowels
 
-        choice = input("Выберите опцию: ")
-        if choice == "1":
-            text = input("Введите текст: ")
-            text_queue.put(text)
-        elif choice == "2":
-            if text_queue.empty():
-                print("Ошибка: текст не введён.")
-            else:
-                print("Отправка текста на анализ...")
-                process_thread = threading.Thread(target=process_text)
-                process_thread.start()
-                process_thread.join()
-        elif choice == "3":
-            if result_queue.empty():
-                print("Ошибка: данные ещё не обработаны.")
-            else:
-                display_results()
-        elif choice == "4":
-            print("Выход из программы.")
-            break
-        else:
-            print("Некорректный выбор. Попробуйте ещё раз.")
+    # Генератор для подсчёта гласных и согласных
+    def word_analysis(word):
+        vowel_count = sum(1 for char in word if char in vowels)
+        consonant_count = sum(1 for char in word if char in consonants)
+        return word, vowel_count, consonant_count
+
+    return map(word_analysis, words)
 
 
-# Чистая функция для анализа текста
-def analyze_text(text):
-    """Возвращает анализ текста: список слов с количеством гласных и согласных."""
-    vowels = "aeiouAEIOU"
+# Асинхронная обработка текста
+def process_text_async(text):
     words = text.split()
-    return list(
-        map(
-            lambda word: (word, sum(1 for c in word if c in vowels),
-                          sum(1 for c in word if c.isalpha() and c not in vowels)),
-            words
-        )
-    )
+    with ThreadPoolExecutor() as executor:
+        # Разбиваем текст на части
+        chunk_size = max(len(words) // 4, 1)  # 4 потока
+        futures = [
+            executor.submit(analyze_text, words[i:i + chunk_size])
+            for i in range(0, len(words), chunk_size)
+        ]
+
+        # Сбор результатов
+        results = []
+        for future in as_completed(futures):
+            results.extend(list(future.result()))
+        return results
 
 
-def process_text():
-    """Анализ текста во втором потоке."""
-    if not text_queue.empty():
-        text = text_queue.get()
-        results = analyze_text(text)
-        result_queue.put(results)
-        print("Анализ завершён.")
-    else:
-        print("Нет текста для анализа.")
+# Тестовый запуск
+def main():
+    sample_text = "This is an example text to demonstrate optimization using Python." * 1000
+    start = time.time()
+    results = process_text_async(sample_text)
+    end = time.time()
+
+    print(f"Processed {len(sample_text.split())} words in {end - start:.2f} seconds.")
+    print(f"Sample result: {results[:5]}")
 
 
-def display_results():
-    """Вывод результатов в третьем потоке."""
-    if not result_queue.empty():
-        results = result_queue.get()
-        print(f"{'Слово':<15}{'Гласные':<10}{'Согласные':<10}")
-        print("-" * 35)
-        for word, vowels, consonants in results:
-            print(f"{word:<15}{vowels:<10}{consonants:<10}")
-        print("-" * 35)
-    else:
-        print("Нет результатов для отображения.")
-
-
-# Основной поток для запуска меню
 if __name__ == "__main__":
-    menu_thread = threading.Thread(target=menu)
-    menu_thread.start()
-    menu_thread.join()
+    main()
